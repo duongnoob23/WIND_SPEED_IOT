@@ -24,6 +24,19 @@ const Compass = () => {
   const subscriptionRef = useRef(null);
   const angleHistory = useRef([]); // Lưu trữ lịch sử góc để làm mượt
 
+  // Hàm chuẩn hóa góc (luôn trả về giá trị trong khoảng 0-360)
+  const normalizeAngle = (angle) => {
+    return ((angle % 360) + 360) % 360;
+  };
+
+  // Hàm tính khoảng cách ngắn nhất giữa hai góc
+  const getShortestDelta = (from, to) => {
+    let delta = to - from;
+    if (delta > 180) delta -= 360;
+    else if (delta < -180) delta += 360;
+    return delta;
+  };
+
   // Hàm tính khoảng cách
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3;
@@ -112,14 +125,27 @@ const Compass = () => {
 
   // Cập nhật hướng la bàn
   useEffect(() => {
-    const newDirection = (angle + 90) % 360;
-    const currentDirection = rotate.value % 360;
-    let delta = newDirection - currentDirection;
+    const newDirection = normalizeAngle(angle + 90);
+    const currentDirection = normalizeAngle(rotate.value);
 
-    if (delta > 180) delta -= 360;
-    else if (delta < -180) delta += 360;
+    let delta;
 
-    const finalDirection = currentDirection + delta;
+    // Xử lý riêng trường hợp từ 0° đến 360° (hoặc gần 360°)
+    if (currentDirection <= 45 && newDirection >= 315) {
+      // Từ góc nhỏ (gần 0°) đến góc lớn (gần 360°), quay ngược chiều kim đồng hồ
+      delta = -(360 - newDirection + currentDirection);
+    }
+    // Xử lý riêng trường hợp từ 360° đến 0° (hoặc gần 0°)
+    else if (currentDirection >= 315 && newDirection <= 45) {
+      // Từ góc lớn (gần 360°) đến góc nhỏ (gần 0°), quay theo chiều kim đồng hồ
+      delta = newDirection + (360 - currentDirection);
+    }
+    // Trường hợp thông thường: Tính delta ngắn nhất
+    else {
+      delta = getShortestDelta(currentDirection, newDirection);
+    }
+
+    const finalDirection = normalizeAngle(currentDirection + delta);
 
     // Chỉ cập nhật khi thay đổi đáng kể
     if (Math.abs(finalDirection - lastDirection.current) > 1) {

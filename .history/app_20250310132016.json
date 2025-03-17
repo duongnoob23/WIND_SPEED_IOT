@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "IOT_WIND/APP",
+    "name": "sample-app",
     "slug": "sample-app",
     "version": "1.0.0",
     "orientation": "portrait",

@@ -4,43 +4,26 @@ import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
+  withTiming,
 } from "react-native-reanimated";
 import * as Location from "expo-location";
 import { Magnetometer } from "expo-sensors";
 
 const COMPASS_SIZE = 400;
-const CENTER = 100;
-const RADIUS = 90;
+const CENTER = 200;
+const RADIUS = 180;
 
 const Compass = () => {
   const lastDirection = useRef(0);
-  const [direction, setDirection] = useState(220);
-  const rotate = useSharedValue(220);
+  const [direction, setDirection] = useState(0);
+  const rotate = useSharedValue(0);
   const [angle, setAngle] = useState(0);
   const [location, setLocation] = useState(null);
   const [errorMsg, setErrorMsg] = useState("");
   const lastLocation = useRef(null);
   const subscriptionRef = useRef(null);
-  const angleHistory = useRef([]); // Lưu trữ lịch sử góc để làm mượt
 
-  // Hàm tính khoảng cách
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3;
-    const φ1 = (lat1 * Math.PI) / 180;
-    const φ2 = (lat2 * Math.PI) / 180;
-    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
-    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
-
-    const a =
-      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c;
-  };
-
-  // Lấy dữ liệu vị trí
+  // Lấy dữ liệu vị trí từ expo-location
   useEffect(() => {
     const startWatching = async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -57,7 +40,6 @@ const Compass = () => {
         },
         (loc) => {
           const newCoords = loc.coords;
-
           if (lastLocation.current) {
             const distance = calculateDistance(
               lastLocation.current.latitude,
@@ -65,12 +47,8 @@ const Compass = () => {
               newCoords.latitude,
               newCoords.longitude
             );
-
-            if (distance < 5) {
-              return;
-            }
+            if (distance < 5) return; // Chỉ cập nhật nếu di chuyển > 5m
           }
-
           setLocation(newCoords);
           lastLocation.current = newCoords;
         }
@@ -80,39 +58,40 @@ const Compass = () => {
     startWatching();
 
     return () => {
-      if (subscriptionRef.current) {
-        subscriptionRef.current.remove();
-      }
+      if (subscriptionRef.current) subscriptionRef.current.remove();
     };
   }, []);
 
-  // Lấy dữ liệu hướng từ Magnetometer và làm mượt
+  // Hàm tính khoảng cách giữa hai tọa độ
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371e3; // Bán kính Trái Đất (mét)
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+      Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+      Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c; // Khoảng cách (mét)
+  };
+
+  // Lấy dữ liệu hướng từ Magnetometer
   useEffect(() => {
-    let subscription = Magnetometer.addListener((data) => {
+    const subscription = Magnetometer.addListener((data) => {
       let { x, y } = data;
       let newAngle = Math.atan2(y, x) * (180 / Math.PI);
-      newAngle = (newAngle + 268 + 360) % 360;
-
-      // Làm mượt bằng trung bình động
-      angleHistory.current.push(newAngle);
-      if (angleHistory.current.length > 5) {
-        angleHistory.current.shift();
-      }
-      const smoothedAngle =
-        angleHistory.current.reduce((a, b) => a + b, 0) /
-        angleHistory.current.length;
-
-      setAngle(Math.round(smoothedAngle));
+      newAngle = (newAngle + 360) % 360; // Chuẩn hóa góc từ 0-360°
+      setAngle(Math.round(newAngle));
     });
-
-    return () => {
-      subscription && subscription.remove();
-    };
+    Magnetometer.setUpdateInterval(100); // Cập nhật mỗi 100ms
+    return () => subscription && subscription.remove();
   }, []);
 
-  // Cập nhật hướng la bàn
+  // Cập nhật góc xoay của la bàn
   useEffect(() => {
-    const newDirection = (angle + 90) % 360;
+    const newDirection = angle;
     const currentDirection = rotate.value % 360;
     let delta = newDirection - currentDirection;
 
@@ -121,44 +100,39 @@ const Compass = () => {
 
     const finalDirection = currentDirection + delta;
 
-    // Chỉ cập nhật khi thay đổi đáng kể
+    // Chỉ cập nhật khi thay đổi > 1 độ để tránh rung
     if (Math.abs(finalDirection - lastDirection.current) > 1) {
       lastDirection.current = finalDirection;
       setDirection(finalDirection);
-      rotate.value = withSpring(finalDirection, {
-        damping: 20,
-        stiffness: 100,
-        mass: 1,
-      });
+      rotate.value = withTiming(finalDirection, { duration: 200 });
     }
   }, [angle]);
 
-  // Style động cho la bàn
   const animatedStyle = useAnimatedStyle(() => ({
     transform: [{ rotate: `${-rotate.value}deg` }],
   }));
 
   return (
     <View style={styles.all}>
+      {/* La bàn SVG */}
       <View style={styles.container}>
         <Animated.View style={[animatedStyle]}>
-          <Svg width={COMPASS_SIZE} height={COMPASS_SIZE} viewBox="0 0 200 200">
+          <Svg width={COMPASS_SIZE} height={COMPASS_SIZE} viewBox="0 0 400 400">
             <Circle
-              cx="100"
-              cy="100"
-              r="90"
+              cx={CENTER}
+              cy={CENTER}
+              r={RADIUS}
               stroke="white"
-              strokeWidth="0"
+              strokeWidth="2"
               fill="black"
             />
-            {Array.from({ length: 360 }).map((_, i) => {
-              const rad = (i * Math.PI) / 180;
+            {Array.from({ length: 12 }).map((_, i) => {
+              const deg = i * 30;
+              const rad = (deg * Math.PI) / 180;
               const x1 = CENTER + RADIUS * Math.cos(rad);
               const y1 = CENTER + RADIUS * Math.sin(rad);
-              const x2 =
-                CENTER + (RADIUS - (i % 30 === 0 ? 10 : 5)) * Math.cos(rad);
-              const y2 =
-                CENTER + (RADIUS - (i % 30 === 0 ? 10 : 5)) * Math.sin(rad);
+              const x2 = CENTER + (RADIUS - 10) * Math.cos(rad);
+              const y2 = CENTER + (RADIUS - 10) * Math.sin(rad);
               const textX = CENTER + (RADIUS - 20) * Math.cos(rad);
               const textY = CENTER + (RADIUS - 20) * Math.sin(rad);
 
@@ -169,98 +143,90 @@ const Compass = () => {
                     y1={y1}
                     x2={x2}
                     y2={y2}
-                    stroke={i === 0 ? "red" : "white"}
-                    strokeWidth={i % 30 === 0 ? 1.5 : 0.5}
+                    stroke="white"
+                    strokeWidth="2"
                   />
-                  {i % 30 === 0 && (
-                    <SvgText
-                      x={textX}
-                      y={textY}
-                      fontSize={10}
-                      fill="white"
-                      textAnchor="middle"
-                      alignmentBaseline="middle"
-                    >
-                      {i}°
-                    </SvgText>
-                  )}
+                  <SvgText
+                    x={textX}
+                    y={textY}
+                    fontSize="14"
+                    fill="white"
+                    textAnchor="middle"
+                    alignmentBaseline="middle"
+                  >
+                    {deg}°
+                  </SvgText>
                 </React.Fragment>
               );
             })}
-            <SvgText x="95" y="20" fill="white" fontSize="16" fontWeight="bold">
-              T
-            </SvgText>
+            {/* Hiển thị các hướng chính */}
             <SvgText
-              x="95"
-              y="185"
-              fill="white"
-              fontSize="16"
-              fontWeight="bold"
-            >
-              Đ
-            </SvgText>
-            <SvgText
-              x="175"
-              y="105"
-              fill="white"
-              fontSize="16"
-              fontWeight="bold"
-            >
-              B
-            </SvgText>
-            <SvgText
-              x="15"
-              y="105"
-              fill="white"
-              fontSize="16"
-              fontWeight="bold"
+              x={CENTER}
+              y={CENTER - RADIUS + 30}
+              fill="red"
+              fontSize="20"
+              textAnchor="middle"
             >
               N
+            </SvgText>
+            <SvgText
+              x={CENTER + RADIUS - 30}
+              y={CENTER}
+              fill="white"
+              fontSize="20"
+              textAnchor="middle"
+            >
+              E
+            </SvgText>
+            <SvgText
+              x={CENTER}
+              y={CENTER + RADIUS - 30}
+              fill="white"
+              fontSize="20"
+              textAnchor="middle"
+            >
+              S
+            </SvgText>
+            <SvgText
+              x={CENTER - RADIUS + 30}
+              y={CENTER}
+              fill="white"
+              fontSize="20"
+              textAnchor="middle"
+            >
+              W
             </SvgText>
           </Svg>
         </Animated.View>
 
+        {/* Kim la bàn cố định */}
         <View style={styles.needleContainer}>
-          <Svg width="400" height="400" viewBox="0 0 400 400">
+          <Svg width={COMPASS_SIZE} height={COMPASS_SIZE} viewBox="0 0 400 400">
             <Line
-              x1="200"
-              y1="10"
-              x2="200"
-              y2="68"
+              x1={CENTER}
+              y1={CENTER - 100}
+              x2={CENTER}
+              y2={CENTER + 100}
               stroke="red"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
-            <Line
-              x1="200"
-              y1="120"
-              x2="200"
-              y2="280"
-              stroke="white"
-              strokeWidth="1"
-            />
-            <Line
-              x1="110"
-              y1="200"
-              x2="280"
-              y2="200"
-              stroke="white"
-              strokeWidth="1"
+              strokeWidth="4"
             />
           </Svg>
         </View>
       </View>
 
-      <Text style={styles.angleText}>{Math.round(angle)}°</Text>
+      {/* Hiển thị hướng dưới dạng văn bản */}
+      <Text style={styles.angleText}>Hướng: {Math.round(angle)}°</Text>
+
+      {/* Hiển thị vị trí */}
       <View style={styles.locationContainer}>
         <Text style={styles.locationTitle}>📍 Vị trí hiện tại:</Text>
         {location ? (
           <Text style={styles.locationText}>
-            Latitude: {location.latitude}
+            Latitude: {location.latitude.toFixed(4)}
             {"\n"}
             Longitude: {location.longitude.toFixed(4)}
             {"\n"}
-            <Text>Hướng: {angle}°</Text>
+            Hướng: {Math.round(angle)}°
           </Text>
         ) : (
           <Text style={styles.locationText}>
@@ -285,8 +251,8 @@ const styles = StyleSheet.create({
   },
   needleContainer: {
     position: "absolute",
-    width: 400,
-    height: 400,
+    width: COMPASS_SIZE,
+    height: COMPASS_SIZE,
     justifyContent: "center",
     alignItems: "center",
   },

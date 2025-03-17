@@ -4,7 +4,7 @@ import Svg, { Circle, Line, Text as SvgText } from "react-native-svg";
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
-  withSpring,
+  withTiming,
 } from "react-native-reanimated";
 import * as Location from "expo-location";
 import { Magnetometer } from "expo-sensors";
@@ -22,11 +22,10 @@ const Compass = () => {
   const [errorMsg, setErrorMsg] = useState("");
   const lastLocation = useRef(null);
   const subscriptionRef = useRef(null);
-  const angleHistory = useRef([]); // Lưu trữ lịch sử góc để làm mượt
 
   // Hàm tính khoảng cách
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371e3;
+    const R = 6371e3; // Bán kính Trái Đất (mét)
     const φ1 = (lat1 * Math.PI) / 180;
     const φ2 = (lat2 * Math.PI) / 180;
     const Δφ = ((lat2 - lat1) * Math.PI) / 180;
@@ -37,7 +36,7 @@ const Compass = () => {
       Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 
-    return R * c;
+    return R * c; // Khoảng cách tính bằng mét
   };
 
   // Lấy dữ liệu vị trí
@@ -86,23 +85,13 @@ const Compass = () => {
     };
   }, []);
 
-  // Lấy dữ liệu hướng từ Magnetometer và làm mượt
+  // Lấy dữ liệu hướng từ Magnetometer
   useEffect(() => {
     let subscription = Magnetometer.addListener((data) => {
       let { x, y } = data;
       let newAngle = Math.atan2(y, x) * (180 / Math.PI);
-      newAngle = (newAngle + 268 + 360) % 360;
-
-      // Làm mượt bằng trung bình động
-      angleHistory.current.push(newAngle);
-      if (angleHistory.current.length > 5) {
-        angleHistory.current.shift();
-      }
-      const smoothedAngle =
-        angleHistory.current.reduce((a, b) => a + b, 0) /
-        angleHistory.current.length;
-
-      setAngle(Math.round(smoothedAngle));
+      newAngle = (newAngle + 268 + 360) % 360; // Điều chỉnh góc
+      setAngle(Math.round(newAngle));
     });
 
     return () => {
@@ -121,15 +110,13 @@ const Compass = () => {
 
     const finalDirection = currentDirection + delta;
 
-    // Chỉ cập nhật khi thay đổi đáng kể
+    // Chỉ cập nhật khi thay đổi > 1 độ để tránh rung
     if (Math.abs(finalDirection - lastDirection.current) > 1) {
       lastDirection.current = finalDirection;
       setDirection(finalDirection);
-      rotate.value = withSpring(finalDirection, {
-        damping: 20,
-        stiffness: 100,
-        mass: 1,
-      });
+
+      // Sử dụng withTiming thay vì withSpring để giảm rung
+      rotate.value = withTiming(finalDirection, { duration: 200 });
     }
   }, [angle]);
 
